@@ -1,0 +1,97 @@
+# Simple Code — пример конфигурации
+# Сохраните как simplecode.toml в корне проекта
+
+# Какой провайдер использовать по умолчанию
+provider = "openai"
+
+# Модель по умолчанию (оставьте пустым для модели провайдера)
+model = ""
+
+# Максимальное количество шагов агента
+max_agent_steps = 30
+
+# Рабочая директория (по умолчанию текущая)
+# working_dir = "/path/to/your/project"
+
+# Директория для хранения сессий
+sessions_dir = ".simplecode/sessions"
+
+# Файл системного промпта (опционально)
+# system_prompt_file = "AGENTS.md"
+
+# ---------- Встроенные провайдеры ----------
+
+[providers.openai]
+# API ключ можно задать здесь или через OPENAI_API_KEY
+api_key = ""
+# base_url = ""  # Для совместимых API (Together, Groq и т.д.)
+# default_model = "gpt-4o"
+
+[providers.anthropic]
+# API ключ можно задать здесь или через ANTHROPIC_API_KEY
+api_key = ""
+# default_model = "claude-sonnet-4-20250514"
+
+# ---------- Локальные серверы ----------
+
+# Ollama (установите: https://ollama.ai)
+# curl http://localhost:11434/api/tags  — список моделей
+# [providers.ollama]
+# api_key = "ollama"
+# base_url = "http://localhost:11434/v1"
+# default_model = "llama3"
+
+# LM Studio (установите: https://lmstudio.ai)
+# [providers.lmstudio]
+# api_key = "lm-studio"
+# base_url = "http://localhost:1234/v1"
+# default_model = ""
+
+# llama.cpp server
+# [providers.llamacpp]
+# api_key = "llamacpp"
+# base_url = "http://localhost:8080/v1"
+# default_model = ""
+
+# vLLM
+# [providers.vllm]
+# api_key = "vllm"
+# base_url = "http://localhost:8000/v1"
+# default_model = ""
+
+# ---------- Другие облачные провайдеры ----------
+
+# Together AI
+# [providers.together]
+# api_key = ""
+# base_url = "https://api.together.xyz/v1"
+# default_model = "meta-llama/Llama-3-70b-chat-hf"
+
+# Groq
+# [providers.groq]
+# api_key = ""
+# base_url = "https://api.groq.com/openai/v1"
+# default_model = "llama3-70b-8192"
+
+# OpenRouter
+# [providers.openrouter]
+# api_key = ""
+# base_url = "https://openrouter.ai/api/v1"
+# default_model = ""
+
+# ---------- Управление через CLI ----------
+#
+# Вы также можете добавлять/удалять провайдеры через командную строку:
+#
+#   python main.py add-provider --name my-ollama --type ollama --url http://localhost:11434/v1
+#   python main.py add-provider --name my-api --type custom --url https://my-api.com/v1 --api-key sk-xxx
+#   python main.py providers              # Список всех провайдеров
+#   python main.py test-provider my-ollama # Проверить подключение
+#   python main.py remove-provider my-ollama
+#
+# И интерактивно через TUI:
+#   /add-provider    — мастер добавления
+#   /providers       — список провайдеров
+#   /test-provider <имя> — проверка подключения
+#   /use <имя>       — переключение
+#   /remove-provider <имя> — удаление
