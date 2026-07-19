@@ -25,14 +25,15 @@ class OpenAIProvider(BaseProvider):
         tools: list[dict] | None = None,
     ) -> LLMResponse:
         """Отправляет запрос в OpenAI-совместимый API."""
-        if not self.api_key:
+        # Проверяем ключ только для официальных облачных API
+        url = f"{self.base_url or self.DEFAULT_BASE_URL}/chat/completions"
+        is_cloud = not self.base_url or "api.openai.com" in self.base_url
+        if is_cloud and not self.api_key:
             raise ValueError(
                 "API ключ не задан. "
                 "Добавьте провайдер заново через /add-provider "
                 "или задайте API ключ в simplecode.toml."
             )
-
-        url = f"{self.base_url or self.DEFAULT_BASE_URL}/chat/completions"
 
         payload: dict = {
             "model": self.model or self.DEFAULT_MODEL,
@@ -44,10 +45,9 @@ class OpenAIProvider(BaseProvider):
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
 
         with httpx.Client(timeout=120.0) as client:
             resp = client.post(url, json=payload, headers=headers)
