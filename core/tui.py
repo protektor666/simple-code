@@ -243,12 +243,20 @@ class TUI:
             )
 
         # Шаг 4: API ключ
-        if provider_type in ("openai", "anthropic", "custom") and base_url != "":
+        if is_local:
+            api_key = provider_type  # "ollama", "lmstudio" и т.д.
+        elif provider_type in ("openai", "anthropic", "custom") and base_url != "":
             api_key = Prompt.ask("[bold cyan]API ключ (или оставьте пустым)[/bold cyan]", default="")
         elif provider_type in ("openai", "anthropic"):
             api_key = Prompt.ask("[bold cyan]API ключ[/bold cyan]", default="")
+            if not api_key:
+                self.console.print(f"[{ERROR_COLOR}]API ключ обязателен для облачных провайдеров.[/{ERROR_COLOR}]")
+                return
         else:
-            api_key = ""
+            api_key = Prompt.ask("[bold cyan]API ключ[/bold cyan]", default="")
+            if not api_key:
+                self.console.print(f"[{ERROR_COLOR}]API ключ обязателен.[/{ERROR_COLOR}]")
+                return
 
         # Шаг 5: Модель по умолчанию
         default_model = Prompt.ask(

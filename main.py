@@ -281,8 +281,13 @@ def _ensure_provider(cfg, provider_manager):
         base_url = input("Base URL (пусто = официальный API): ").strip()
 
     api_key = ""
-    if not is_local:
+    if is_local:
+        api_key = provider_type  # "ollama", "lmstudio" и т.д. — любой непустой ключ
+    else:
         api_key = input("API ключ: ").strip()
+        if not api_key:
+            print("API ключ обязателен для облачных провайдеров.")
+            sys.exit(1)
 
     default_model = input("Модель по умолчанию (пусто = авто): ").strip()
     name = input(f"Имя провайдера [{provider_type}]: ").strip() or provider_type

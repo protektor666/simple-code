@@ -25,6 +25,13 @@ class OpenAIProvider(BaseProvider):
         tools: list[dict] | None = None,
     ) -> LLMResponse:
         """Отправляет запрос в OpenAI-совместимый API."""
+        if not self.api_key:
+            raise ValueError(
+                "API ключ не задан. "
+                "Добавьте провайдер заново через /add-provider "
+                "или задайте API ключ в simplecode.toml."
+            )
+
         url = f"{self.base_url or self.DEFAULT_BASE_URL}/chat/completions"
 
         payload: dict = {
