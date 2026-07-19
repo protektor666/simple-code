@@ -234,6 +234,71 @@ def cmd_use(args):
     print(f"Для полного переключения запустите: python main.py chat --provider {args.name}")
 
 
+def _ensure_provider(cfg, provider_manager):
+    """Проверяет есть ли настроенный провайдер. Если нет — предлагает добавить."""
+    # Есть ли провайдер в конфиге с валидным ключом?
+    if cfg.provider in cfg.providers:
+        pcfg = cfg.providers[cfg.provider]
+        if pcfg.api_key or pcfg.base_url:
+            return
+
+    # Есть ли хотя бы один управляемый провайдер?
+    managed = provider_manager.list_providers()
+    if managed:
+        first = next(iter(managed))
+        cfg.provider = first
+        provider_manager.sync_to_config(cfg)
+        return
+
+    # Ничего нет — интерактивно предлагаем добавить
+    print("\n=== Нет настроенных провайдеров ===\n")
+    print("Для работы нужен LLM-провайдер (OpenAI, Anthropic, Ollama и т.д.)\n")
+
+    from core.provider_manager import PROVIDER_TYPES
+    print("Доступные типы:")
+    types = list(PROVIDER_TYPES.items())
+    for i, (key, desc) in enumerate(types, 1):
+        print(f"  {i}. {key} — {desc}")
+
+    choice = input("\nВыберите тип (номер или имя): ").strip()
+    try:
+        idx = int(choice) - 1
+        provider_type = types[idx][0]
+    except (ValueError, IndexError):
+        provider_type = choice.lower()
+
+    if provider_type not in PROVIDER_TYPES:
+        print(f"Неизвестный тип: {provider_type}")
+        sys.exit(1)
+
+    is_local = provider_type in ("ollama", "lmstudio", "llamacpp", "vllm")
+
+    if is_local:
+        from core.provider_manager import _default_local_url
+        default_url = _default_local_url(provider_type)
+        base_url = input(f"URL сервера [{default_url}]: ").strip() or default_url
+    else:
+        base_url = input("Base URL (пусто = официальный API): ").strip()
+
+    api_key = ""
+    if not is_local:
+        api_key = input("API ключ: ").strip()
+
+    default_model = input("Модель по умолчанию (пусто = авто): ").strip()
+    name = input(f"Имя провайдера [{provider_type}]: ").strip() or provider_type
+
+    provider_manager.add_provider(
+        name=name,
+        provider_type=provider_type,
+        base_url=base_url,
+        api_key=api_key,
+        default_model=default_model,
+    )
+    cfg.provider = name
+    provider_manager.sync_to_config(cfg)
+    print(f"\nПровайдер '{name}' добавлен!\n")
+
+
 def cmd_chat(args):
     """Запустить интерактивный чат."""
     cfg = load_config(args.config)
@@ -248,6 +313,9 @@ def cmd_chat(args):
     # Синхронизируем управляемых провайдеров
     provider_manager = ProviderManager(cfg.working_dir)
     provider_manager.sync_to_config(cfg)
+
+    # Проверяем наличие провайдера (интерактивно если первый запуск)
+    _ensure_provider(cfg, provider_manager)
 
     sessions_dir = os.path.join(cfg.working_dir, cfg.sessions_dir)
     session_manager = SessionManager(sessions_dir)
@@ -264,7 +332,12 @@ def cmd_chat(args):
             print(f"Загружаю последнюю сессию: {last['id']} ({last['title'][:50]})")
             session = session_manager.load_session(last["id"])
         else:
-            model = args.model or get_default_model(cfg)
+            model = args.model
+            if not model:
+                try:
+                    model = get_default_model(cfg)
+                except ValueError:
+                    model = ""
             session = session_manager.create_session(model=model, provider=cfg.provider)
 
     agent = Agent(cfg, session)

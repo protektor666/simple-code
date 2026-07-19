@@ -30,3 +30,7 @@ desktop.ini
 
 # Config with secrets
 simplecode.toml
+
+# Compiled
+*.exe
+*.spec
