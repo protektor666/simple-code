@@ -1,0 +1,32 @@
+services:
+  gateway:
+    image: nousresearch/hermes-agent:latest
+    container_name: hermes
+    restart: unless-stopped
+    volumes:
+      - "C:/Users/prote/.hermes:/opt/data"
+    environment:
+      - HERMES_UID=10000
+      - HERMES_GID=10000
+    ports:
+      - "127.0.0.1:9118:9118"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["gateway", "run"]
+  dashboard:
+    image: nousresearch/hermes-agent:latest
+    container_name: hermes-dashboard
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    volumes:
+      - "C:/Users/prote/.hermes:/opt/data"
+    environment:
+      - HERMES_UID=10000
+      - HERMES_GID=10000
+      - HERMES_DASHBOARD_HOST=0.0.0.0
+    ports:
+      - "127.0.0.1:9119:9119"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["dashboard", "--host", "0.0.0.0", "--port", "9119", "--no-open", "--insecure"]
