@@ -282,13 +282,52 @@ def cmd_chat(args):
     if args.provider:
         _auto_configure_provider(cfg, provider_manager, args)
 
-    # Если всё ещё нет провайдера — первый запуск, предлагаем
+    # Если всё ещё нет провайдера — первый запуск, интерактивный мастер
     if cfg.provider not in cfg.providers:
-        print("\nНет настроенного провайдера.\n"
-              "Запусти с --provider, например:\n"
-              "  simple-code.exe --provider ollama\n"
-              "  simple-code.exe --provider openai\n")
-        sys.exit(0)
+        print("\n=== Первый запуск: настройка провайдера ===\n")
+        print("Для работы нужен LLM-провайдер.\n")
+
+        types = list(PROVIDER_TYPES.items())
+        for i, (key, desc) in enumerate(types, 1):
+            print(f"  {i}. {key} — {desc}")
+
+        choice = input("\nВыберите тип (номер или имя): ").strip()
+        try:
+            idx = int(choice) - 1
+            provider_type = types[idx][0]
+        except (ValueError, IndexError):
+            provider_type = choice.lower()
+
+        if provider_type not in PROVIDER_TYPES:
+            print(f"Неизвестный тип: {provider_type}")
+            input("\nНажмите Enter для выхода...")
+            sys.exit(1)
+
+        is_local = provider_type in ("ollama", "lmstudio", "llamacpp", "vllm")
+
+        if is_local:
+            default_url = DEFAULT_LOCAL_URLS.get(provider_type, "http://localhost:8080")
+            base_url = input(f"URL сервера [{default_url}]: ").strip() or default_url
+            api_key = provider_type
+        else:
+            base_url = input("Base URL (пусто = официальный API): ").strip()
+            api_key = input("API ключ: ").strip()
+            if not api_key:
+                print("API ключ обязателен.")
+                input("\nНажмите Enter для выхода...")
+                sys.exit(1)
+
+        default_model = input("Модель по умолчанию (пусто = авто): ").strip()
+        name = input(f"Имя провайдера [{provider_type}]: ").strip() or provider_type
+
+        provider_manager.add_provider(
+            name=name, provider_type=provider_type,
+            base_url=base_url, api_key=api_key,
+            default_model=default_model,
+        )
+        cfg.provider = name
+        provider_manager.sync_to_config(cfg)
+        print(f"\nПровайдер '{name}' настроен! Запускаю...\n")
 
     provider_manager.sync_to_config(cfg)
 
