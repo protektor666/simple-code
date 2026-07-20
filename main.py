@@ -3,23 +3,20 @@ Simple Code — упрощённый аналог OpenCode.
 Точка входа приложения.
 
 Запуск:
-    python main.py
-    python main.py --provider anthropic --model claude-sonnet-4-20250514
+    simple-code.exe
+    simple-code.exe --provider ollama --model llama3.2
+    simple-code.exe --provider ollama --model llama3.2 --ollama-base-url http://localhost:11434
+    simple-code.exe --message "напиши hello world на python"
 
 Управление провайдерами:
-    python main.py providers              # Список провайдеров
-    python main.py add-provider           # Интерактивное добавление
-    python main.py add-provider --name my-ollama --type ollama
-    python main.py remove-provider my-ollama
-    python main.py test-provider my-ollama
-    python main.py use my-ollama
+    simple-code.exe providers
+    simple-code.exe add-provider
 """
 
 import argparse
 import sys
 import os
 
-# Добавляем корень проекта в путь
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.config import load_config
@@ -30,44 +27,54 @@ from core.provider_manager import ProviderManager, PROVIDER_TYPES
 from core.tui import TUI
 
 
+# Дефолтные URL для локальных провайдеров
+DEFAULT_LOCAL_URLS = {
+    "ollama": "http://localhost:11434",
+    "lmstudio": "http://localhost:1234",
+    "llamacpp": "http://localhost:8080",
+    "vllm": "http://localhost:8000",
+}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Simple Code — AI-ассистент для работы с кодом",
     )
+
+    # Основные аргументы (opencode-совместимые)
+    parser.add_argument("--provider", default=None, help="LLM-провайдер (ollama, openai, anthropic...)")
+    parser.add_argument("--model", default=None, help="Модель LLM")
+    parser.add_argument("--ollama-base-url", "--api-base-url", default=None, dest="base_url",
+                        help="Base URL для API (например http://localhost:11434)")
+    parser.add_argument("-c", "--config", default=None, help="Путь к конфигу")
+    parser.add_argument("--dir", default=None, help="Рабочая директория")
+
+    # Прочие опции
+    parser.add_argument("--message", default=None, help="Одноразовое сообщение (без TUI)")
+    parser.add_argument("-s", "--session", default=None, help="ID сессии для загрузки")
+
+    # Подкоманды
     subparsers = parser.add_subparsers(dest="command", help="Команда")
 
-    # --- Чат (по умолчанию) ---
-    chat_parser = subparsers.add_parser("chat", help="Запустить интерактивный чат")
-    chat_parser.add_argument("-p", "--provider", default=None, help="LLM-провайдер")
-    chat_parser.add_argument("-m", "--model", default=None, help="Модель LLM")
-    chat_parser.add_argument("-c", "--config", default=None, help="Путь к конфигу")
-    chat_parser.add_argument("-s", "--session", default=None, help="ID сессии")
-    chat_parser.add_argument("--dir", default=None, help="Рабочая директория")
-    chat_parser.add_argument("--message", default=None, help="Одноразовое сообщение")
-
-    # --- Провайдеры ---
     providers_parser = subparsers.add_parser("providers", help="Список всех провайдеров")
-    providers_parser.add_argument("--dir", default=None, help="Рабочая директория")
+    providers_parser.add_argument("--dir", default=None)
 
     add_parser = subparsers.add_parser("add-provider", help="Добавить провайдера")
-    add_parser.add_argument("--name", default=None, help="Имя провайдера")
-    add_parser.add_argument("--type", dest="provider_type", default=None, help=f"Тип: {', '.join(PROVIDER_TYPES.keys())}")
-    add_parser.add_argument("--url", default=None, help="Base URL сервера")
-    add_parser.add_argument("--api-key", default=None, help="API ключ")
-    add_parser.add_argument("--model", default=None, help="Модель по умолчанию")
-    add_parser.add_argument("--dir", default=None, help="Рабочая директория")
+    add_parser.add_argument("--name", default=None)
+    add_parser.add_argument("--type", dest="provider_type", default=None,
+                            help=f"Тип: {', '.join(PROVIDER_TYPES.keys())}")
+    add_parser.add_argument("--url", default=None)
+    add_parser.add_argument("--api-key", default=None)
+    add_parser.add_argument("--model", default=None)
+    add_parser.add_argument("--dir", default=None)
 
     remove_parser = subparsers.add_parser("remove-provider", help="Удалить провайдера")
-    remove_parser.add_argument("name", help="Имя провайдера")
-    remove_parser.add_argument("--dir", default=None, help="Рабочая директория")
+    remove_parser.add_argument("name")
+    remove_parser.add_argument("--dir", default=None)
 
     test_parser = subparsers.add_parser("test-provider", help="Проверить подключение")
-    test_parser.add_argument("name", help="Имя провайдера")
-    test_parser.add_argument("--dir", default=None, help="Рабочая директория")
-
-    use_parser = subparsers.add_parser("use", help="Переключить провайдер")
-    use_parser.add_argument("name", help="Имя провайдера")
-    use_parser.add_argument("--dir", default=None, help="Рабочая директория")
+    test_parser.add_argument("name")
+    test_parser.add_argument("--dir", default=None)
 
     return parser.parse_args()
 
@@ -76,15 +83,63 @@ def _get_working_dir(args) -> str:
     return args.dir if hasattr(args, "dir") and args.dir else os.getcwd()
 
 
+def _auto_configure_provider(cfg, provider_manager, args):
+    """
+    Авто-конфигурация провайдера из аргументов командной строки.
+    Создаёт временного провайдера если нужно.
+    """
+    provider_name = args.provider or cfg.provider
+    cfg.provider = provider_name
+
+    # Если уже есть настроенный провайдер с таким именем — используем его
+    if provider_name in cfg.providers:
+        return
+
+    # Провайдер уже есть в managed list?
+    managed = provider_manager.get_provider(provider_name)
+    if managed:
+        provider_manager.sync_to_config(cfg)
+        return
+
+    # Определяем base_url
+    base_url = args.base_url or ""
+    if not base_url and provider_name in DEFAULT_LOCAL_URLS:
+        base_url = DEFAULT_LOCAL_URLS[provider_name]
+
+    # Определяем api_key
+    api_key = ""
+    if provider_name == "openai":
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+    elif provider_name == "anthropic":
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    elif base_url:
+        api_key = provider_name
+
+    # Определяем модель
+    model = args.model or ""
+
+    # Добавляем провайдера
+    try:
+        provider_manager.add_provider(
+            name=provider_name,
+            provider_type=provider_name,
+            base_url=base_url,
+            api_key=api_key,
+            default_model=model,
+        )
+        provider_manager.sync_to_config(cfg)
+    except Exception as e:
+        print(f"Предупреждение: {e}", file=sys.stderr)
+
+
 def cmd_providers(args):
-    """Показать список всех провайдеров."""
     wd = _get_working_dir(args)
     mgr = ProviderManager(wd)
     providers = mgr.list_providers()
 
     if not providers:
         print("Нет добавленных провайдеров.")
-        print("Используйте: python main.py add-provider")
+        print("Используйте: simple-code.exe add-provider")
         return
 
     print(f"\n{'Имя':<20} {'Тип':<12} {'URL':<40} {'Модель':<20}")
@@ -97,11 +152,9 @@ def cmd_providers(args):
 
 
 def cmd_add_provider(args):
-    """Добавить нового провайдера (CLI или интерактивно)."""
     wd = _get_working_dir(args)
     mgr = ProviderManager(wd)
 
-    # Если все параметры указаны через CLI — добавляем без интерактива
     if args.name and args.provider_type:
         try:
             provider = mgr.add_provider(
@@ -118,14 +171,9 @@ def cmd_add_provider(args):
             print(f"Ошибка: {e}")
         return
 
-    # Интерактивный режим
     print("\n=== Добавление нового провайдера ===\n")
 
-    if not args.name:
-        name = input("Имя провайдера (латиница): ").strip().lower().replace(" ", "-")
-    else:
-        name = args.name
-
+    name = args.name or input("Имя провайдера (латиница): ").strip().lower().replace(" ", "-")
     if not name:
         print("Имя не может быть пустым.")
         return
@@ -150,37 +198,36 @@ def cmd_add_provider(args):
 
     if provider_type not in PROVIDER_TYPES:
         print(f"Неизвестный тип: {provider_type}")
-        print(f"Доступные: {', '.join(PROVIDER_TYPES.keys())}")
         return
 
     is_local = provider_type in ("ollama", "lmstudio", "llamacpp", "vllm")
 
     if not args.url:
         if is_local:
-            from core.provider_manager import _default_local_url
-            default_url = _default_local_url(provider_type)
+            default_url = DEFAULT_LOCAL_URLS.get(provider_type, "http://localhost:8080")
             base_url = input(f"URL сервера [{default_url}]: ").strip() or default_url
         else:
             base_url = input("Base URL (пусто = официальный API): ").strip()
     else:
         base_url = args.url
 
-    if not args.api_key and not is_local:
-        api_key = input("API ключ (пусто = без ключа): ").strip()
+    api_key = ""
+    if is_local:
+        api_key = provider_type
+    elif args.api_key:
+        api_key = args.api_key
     else:
-        api_key = args.api_key or ""
+        api_key = input("API ключ: ").strip()
+        if not api_key:
+            print("API ключ обязателен.")
+            return
 
-    if not args.model:
-        default_model = input("Модель по умолчанию (пусто = авто): ").strip()
-    else:
-        default_model = args.model
+    default_model = args.model or input("Модель по умолчанию (пусто = авто): ").strip()
 
     try:
         provider = mgr.add_provider(
-            name=name,
-            provider_type=provider_type,
-            base_url=base_url,
-            api_key=api_key,
+            name=name, provider_type=provider_type,
+            base_url=base_url, api_key=api_key,
             default_model=default_model,
         )
         print(f"\nПровайдер '{provider.name}' добавлен ({provider.provider_type})")
@@ -189,7 +236,6 @@ def cmd_add_provider(args):
 
 
 def cmd_remove_provider(args):
-    """Удалить провайдера."""
     wd = _get_working_dir(args)
     mgr = ProviderManager(wd)
 
@@ -206,7 +252,6 @@ def cmd_remove_provider(args):
 
 
 def cmd_test_provider(args):
-    """Проверить подключение к провайдеру."""
     wd = _get_working_dir(args)
     mgr = ProviderManager(wd)
 
@@ -225,102 +270,27 @@ def cmd_test_provider(args):
         print(f"  ✗ {result['message']}")
 
 
-def cmd_use(args):
-    """Переключить провайдер."""
-    wd = _get_working_dir(args)
-    mgr = ProviderManager(wd)
-    mgr.sync_to_config  # Синхронизируем
-    print(f"Активный провайдер: {args.name}")
-    print(f"Для полного переключения запустите: python main.py chat --provider {args.name}")
-
-
-def _ensure_provider(cfg, provider_manager):
-    """Проверяет есть ли настроенный провайдер. Если нет — предлагает добавить."""
-    # Есть ли провайдер в конфиге с валидным ключом?
-    if cfg.provider in cfg.providers:
-        pcfg = cfg.providers[cfg.provider]
-        if pcfg.api_key or pcfg.base_url:
-            return
-
-    # Есть ли хотя бы один управляемый провайдер?
-    managed = provider_manager.list_providers()
-    if managed:
-        first = next(iter(managed))
-        cfg.provider = first
-        provider_manager.sync_to_config(cfg)
-        return
-
-    # Ничего нет — интерактивно предлагаем добавить
-    print("\n=== Нет настроенных провайдеров ===\n")
-    print("Для работы нужен LLM-провайдер (OpenAI, Anthropic, Ollama и т.д.)\n")
-
-    from core.provider_manager import PROVIDER_TYPES
-    print("Доступные типы:")
-    types = list(PROVIDER_TYPES.items())
-    for i, (key, desc) in enumerate(types, 1):
-        print(f"  {i}. {key} — {desc}")
-
-    choice = input("\nВыберите тип (номер или имя): ").strip()
-    try:
-        idx = int(choice) - 1
-        provider_type = types[idx][0]
-    except (ValueError, IndexError):
-        provider_type = choice.lower()
-
-    if provider_type not in PROVIDER_TYPES:
-        print(f"Неизвестный тип: {provider_type}")
-        sys.exit(1)
-
-    is_local = provider_type in ("ollama", "lmstudio", "llamacpp", "vllm")
-
-    if is_local:
-        from core.provider_manager import _default_local_url
-        default_url = _default_local_url(provider_type)
-        base_url = input(f"URL сервера [{default_url}]: ").strip() or default_url
-    else:
-        base_url = input("Base URL (пусто = официальный API): ").strip()
-
-    api_key = ""
-    if is_local:
-        api_key = provider_type  # "ollama", "lmstudio" и т.д. — любой непустой ключ
-    else:
-        api_key = input("API ключ: ").strip()
-        if not api_key:
-            print("API ключ обязателен для облачных провайдеров.")
-            sys.exit(1)
-
-    default_model = input("Модель по умолчанию (пусто = авто): ").strip()
-    name = input(f"Имя провайдера [{provider_type}]: ").strip() or provider_type
-
-    provider_manager.add_provider(
-        name=name,
-        provider_type=provider_type,
-        base_url=base_url,
-        api_key=api_key,
-        default_model=default_model,
-    )
-    cfg.provider = name
-    provider_manager.sync_to_config(cfg)
-    print(f"\nПровайдер '{name}' добавлен!\n")
-
-
 def cmd_chat(args):
-    """Запустить интерактивный чат."""
     cfg = load_config(args.config)
 
-    if args.provider:
-        cfg.provider = args.provider
-    if args.model:
-        cfg.model = args.model
     if args.dir:
         cfg.working_dir = args.dir
 
-    # Синхронизируем управляемых провайдеров
     provider_manager = ProviderManager(cfg.working_dir)
-    provider_manager.sync_to_config(cfg)
 
-    # Проверяем наличие провайдера (интерактивно если первый запуск)
-    _ensure_provider(cfg, provider_manager)
+    # Авто-конфигурация провайдера из аргументов
+    if args.provider:
+        _auto_configure_provider(cfg, provider_manager, args)
+
+    # Если всё ещё нет провайдера — первый запуск, предлагаем
+    if cfg.provider not in cfg.providers:
+        print("\nНет настроенного провайдера.\n"
+              "Запусти с --provider, например:\n"
+              "  simple-code.exe --provider ollama\n"
+              "  simple-code.exe --provider openai\n")
+        sys.exit(0)
+
+    provider_manager.sync_to_config(cfg)
 
     sessions_dir = os.path.join(cfg.working_dir, cfg.sessions_dir)
     session_manager = SessionManager(sessions_dir)
@@ -337,12 +307,10 @@ def cmd_chat(args):
             print(f"Загружаю последнюю сессию: {last['id']} ({last['title'][:50]})")
             session = session_manager.load_session(last["id"])
         else:
-            model = args.model
-            if not model:
-                try:
-                    model = get_default_model(cfg)
-                except ValueError:
-                    model = ""
+            try:
+                model = args.model or get_default_model(cfg)
+            except ValueError:
+                model = args.model or ""
             session = session_manager.create_session(model=model, provider=cfg.provider)
 
     agent = Agent(cfg, session)
@@ -366,32 +334,24 @@ def cmd_chat(args):
 def main():
     args = parse_args()
 
-    # Если нет подкоманды — запускаем чат по умолчанию
-    if not args.command:
-        # Создаём фиктивный namespace для chat
-        args = argparse.Namespace(
-            command="chat",
-            provider=None, model=None, config=None,
-            session=None, dir=None, message=None,
-        )
-        cmd_chat(args)
+    # Если подкоманда — выполняем её
+    if args.command:
+        commands = {
+            "providers": cmd_providers,
+            "add-provider": cmd_add_provider,
+            "remove-provider": cmd_remove_provider,
+            "test-provider": cmd_test_provider,
+        }
+        handler = commands.get(args.command)
+        if handler:
+            handler(args)
+        else:
+            print(f"Неизвестная команда: {args.command}")
+            sys.exit(1)
         return
 
-    commands = {
-        "chat": cmd_chat,
-        "providers": cmd_providers,
-        "add-provider": cmd_add_provider,
-        "remove-provider": cmd_remove_provider,
-        "test-provider": cmd_test_provider,
-        "use": cmd_use,
-    }
-
-    handler = commands.get(args.command)
-    if handler:
-        handler(args)
-    else:
-        print(f"Неизвестная команда: {args.command}")
-        sys.exit(1)
+    # Если нет подкоманды — запускаем чат
+    cmd_chat(args)
 
 
 if __name__ == "__main__":
