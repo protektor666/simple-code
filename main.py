@@ -16,6 +16,7 @@ Simple Code — упрощённый аналог OpenCode.
 import argparse
 import sys
 import os
+import socket
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -34,6 +35,29 @@ DEFAULT_LOCAL_URLS = {
     "llamacpp": "http://localhost:8080",
     "vllm": "http://localhost:8000",
 }
+
+
+def _discover_port(host: str, ports: list[int]) -> int:
+    """Проверяет какие порты открыты на хосте, возвращает первый доступный."""
+    for port in ports:
+        try:
+            with socket.create_connection((host, port), timeout=1.0):
+                return port
+        except Exception:
+            continue
+    return ports[0]
+
+
+def _best_base_url(provider_type: str) -> str:
+    """Возвращает base_url для провайдера, авто-определяя порт."""
+    url = DEFAULT_LOCAL_URLS.get(provider_type, "http://localhost:11434")
+    if "localhost" not in url and "127.0.0.1" not in url:
+        return url
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    port = parsed.port or {"ollama": 11434, "lmstudio": 1234, "llamacpp": 8080, "vllm": 8000}.get(provider_type, 11434)
+    discovered = _discover_port("localhost", [port, port + 1, port - 1, port + 2])
+    return f"{parsed.scheme}://{parsed.hostname}:{discovered}"
 
 
 def parse_args() -> argparse.Namespace:
@@ -104,7 +128,7 @@ def _auto_configure_provider(cfg, provider_manager, args):
     # Определяем base_url
     base_url = args.base_url or ""
     if not base_url and provider_name in DEFAULT_LOCAL_URLS:
-        base_url = DEFAULT_LOCAL_URLS[provider_name]
+        base_url = _best_base_url(provider_name)
 
     # Определяем api_key
     api_key = ""
@@ -204,7 +228,7 @@ def cmd_add_provider(args):
 
     if not args.url:
         if is_local:
-            default_url = DEFAULT_LOCAL_URLS.get(provider_type, "http://localhost:8080")
+            default_url = _best_base_url(provider_type)
             base_url = input(f"URL сервера [{default_url}]: ").strip() or default_url
         else:
             base_url = input("Base URL (пусто = официальный API): ").strip()
@@ -306,7 +330,7 @@ def cmd_chat(args):
         is_local = provider_type in ("ollama", "lmstudio", "llamacpp", "vllm")
 
         if is_local:
-            default_url = DEFAULT_LOCAL_URLS.get(provider_type, "http://localhost:8080")
+            default_url = _best_base_url(provider_type)
             base_url = input(f"URL сервера [{default_url}]: ").strip() or default_url
             api_key = provider_type
         else:
