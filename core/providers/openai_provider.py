@@ -26,7 +26,11 @@ class OpenAIProvider(BaseProvider):
     ) -> LLMResponse:
         """Отправляет запрос в OpenAI-совместимый API."""
         # Проверяем ключ только для официальных облачных API
-        url = f"{self.base_url or self.DEFAULT_BASE_URL}/chat/completions"
+        base = (self.base_url or self.DEFAULT_BASE_URL).rstrip("/")
+        # Для Ollama/локальных серверов: если base_url не заканчивается на /v1 — добавляем
+        if base and not base.endswith("/v1") and "api.openai.com" not in base:
+            base = f"{base}/v1"
+        url = f"{base}/chat/completions"
         is_cloud = not self.base_url or "api.openai.com" in self.base_url
         if is_cloud and not self.api_key:
             raise ValueError(
