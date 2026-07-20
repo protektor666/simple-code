@@ -4,6 +4,7 @@
 и если LLM запрашивает инструменты — выполняет их и возвращает результат.
 """
 
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -150,7 +151,7 @@ class Agent:
                     {
                         "id": tc.id,
                         "type": "function",
-                        "function": {"name": tc.name, "arguments": str(tc.arguments)},
+                        "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
                     }
                     for tc in response.tool_calls
                 ]
